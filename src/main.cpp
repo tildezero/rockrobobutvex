@@ -1,18 +1,54 @@
 #include "main.h"
 
 
-// CONSTANTS
+// EDIT THESE CONSTANTS
 
-#define LEFT_MOTOR_ONE 1
-#define LEFT_MOTOR_TWO 2
-#define LEFT_MOTOR_THREE 3
+// The numbers are port numbers and the negative means that the motor should be reversed
 
-// reverse this one?
+// Do not change negatives unless they break
+// These are for the left motors
+#define LEFT_MOTOR_ONE -1
+#define LEFT_MOTOR_TWO -2
+#define LEFT_MOTOR_THREE -3
+
+// These are for the right motors 
 #define RIGHT_MOTOR_ONE 4
 #define RIGHT_MOTOR_TWO 5
 #define RIGHT_MOTOR_THREE 6
 
-#define FLYWHEEL_MOTOR_PORT 7
+// this is for the flywheel motor
+#define FLYWHEEL_MOTOR_PORT 10
+// this is for the arm motor
+#define ARM_MOTOR_PORT 8
+
+// note about pneumatics: plug the red and black wire into the left side of the solenoid
+// and the white wire onto the right side
+// put port names in 'single quotes' (ex: 'A')
+// this is for the left pneumatic piston
+#define PNEUMATICS_PORT_LEFT 'A'
+// this is for the right pneumatic piston
+#define PNEUMATICS_PORT_RIGHT 'B'
+
+// how to change these: just edit the thing after the 2 colons
+// ex, changing pneumatics button from A to B would be 
+// old => ... ControllerDigital::A;
+// new => ... ControllerDigital::X;
+const ControllerDigital PNEUMATICS_BUTTON = ControllerDigital::A;
+const ControllerDigital REVERSE_BUTTON = ControllerDigital::X;
+
+const ControllerDigital CONTINUOUS_FLYWHEEL_BUTTON = ControllerDigital::up;
+const ControllerDigital FLYWHEEL_PULL_BUTTON = ControllerDigital::R2;
+const ControllerDigital FLYWHEEL_PUSH_BUTTON = ControllerDigital::L2;
+
+const ControllerDigital LEVER_UP_BUTTON = ControllerDigital::R1;
+const ControllerDigital LEVER_DOWN_BUTTON = ControllerDigital::L1;
+
+
+
+// OTHER CONSTANTS
+
+std::shared_ptr<ChassisController> drive;
+
 /**
  * A callback function for LLEMU's center button.
  *
@@ -38,8 +74,6 @@ void on_center_button() {
  * to keep execution time for this mode under a few seconds.
  */
 
-#define PNEUMATICS_PORT_LEFT 'A'
-#define PNEUMATICS_PORT_RIGHT 'B'
 
 void initialize() {
 	pros::lcd::initialize();
@@ -51,6 +85,7 @@ void initialize() {
 	pros::ADIDigitalOut right_piston (PNEUMATICS_PORT_RIGHT);
 
 	pros::Motor flywheel_initializer (FLYWHEEL_MOTOR_PORT, MOTOR_GEAR_GREEN, false, MOTOR_ENCODER_DEGREES);
+	pros::Motor arm_initializer (ARM_MOTOR_PORT, MOTOR_GEAR_GREEN, false, MOTOR_ENCODER_DEGREES);
 }
 
 /**
@@ -106,6 +141,18 @@ void opcontrol() {
 	pros::ADIDigitalOut right_piston (PNEUMATICS_PORT_RIGHT);
 
 	pros::Motor flywheel_motor (FLYWHEEL_MOTOR_PORT);
+	pros::Motor arm_motor (ARM_MOTOR_PORT);
+
+	ControllerButton pneumatics (PNEUMATICS_BUTTON);
+	ControllerButton reverse (REVERSE_BUTTON);
+	ControllerButton continious_flywheel (CONTINUOUS_FLYWHEEL_BUTTON);
+	ControllerButton flywheel_pull (FLYWHEEL_PULL_BUTTON);
+	ControllerButton flywheel_push (FLYWHEEL_PUSH_BUTTON);
+	ControllerButton lever_up (LEVER_UP_BUTTON);
+	ControllerButton lever_down (LEVER_DOWN_BUTTON);
+
+
+	ControllerButton abutton (ControllerDigital::A);
 
 	std::shared_ptr<ChassisController> drive =
 		ChassisControllerBuilder()
@@ -113,24 +160,38 @@ void opcontrol() {
 			.withDimensions(AbstractMotor::gearset::green, {{4_in, 14_in}, imev5GreenTPR}) // TODO: CHANGE THESE!!!!
 			.build();
 
+	bool pistonState = false;
+	bool flywheelContinous = false;
+	bool reverseSt = false;
+
 	while (true) {
 
-		// optionally: replace with ->arcade
-		drive->getModel()->tank(controller.getAnalog(ControllerAnalog::leftY),controller.getAnalog(ControllerAnalog::rightY));
+		if (reverse.changedToPressed()) reverseSt = !reverseSt;
+		if (continious_flywheel.changedToPressed()) flywheelContinous = !flywheelContinous;
 
-		if (controller.getDigital(ControllerDigital::A)) {
-			left_piston.set_value(true);
-			right_piston.set_value(true);
+		if (flywheelContinous) flywheel_motor.move(127);
+		else flywheel_motor.brake();
+
+		if (!flywheelContinous && flywheel_pull.isPressed()) flywheel_motor.move(127);
+		if (!flywheelContinous && flywheel_push.isPressed()) flywheel_motor.move(-127);
+
+		if (lever_up.isPressed()) arm_motor.move(127);
+		else if (lever_down.isPressed()) arm_motor.move(-127);
+		else arm_motor.brake();
+
+		if (!reverseSt) {
+			drive->getModel()->arcade(controller.getAnalog(ControllerAnalog::leftY), -1.0 * controller.getAnalog(ControllerAnalog::rightX));
 		} else {
-			left_piston.set_value(false);
-			right_piston.set_value(false);
+			drive->getModel()->arcade(controller.getAnalog(ControllerAnalog::leftY) * -1.0, controller.getAnalog(ControllerAnalog::rightX));
 		}
 
-		if (controller.getDigital(ControllerDigital::B)) {
-			flywheel_motor.move(127);
-		} else {
-			flywheel_motor.brake();
-		}
+
+		if (pneumatics.changedToPressed()) {
+			pistonState = !pistonState;
+		} 
+
+		left_piston.set_value(pistonState);
+		right_piston.set_value(pistonState);
 
 		pros::delay(10);
 	
